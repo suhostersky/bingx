@@ -22,6 +22,7 @@ const (
 const (
 	PositionSideLong  = "LONG"
 	PositionSideShort = "SHORT"
+	PositionSideBoth  = "BOTH"
 )
 
 // Working types
@@ -64,4 +65,10 @@ const (
 const (
 	StopGuaranteedTrue  = "TRUE"
 	StopGuaranteedFalse = "FALSE"
+)
+
+// Margin types
+const (
+	MarginTypeCrossed  = "CROSSED"  // Cross margin mode
+	MarginTypeIsolated = "ISOLATED" // Isolated margin mode
 )

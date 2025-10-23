@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
@@ -259,7 +260,8 @@ type CloseAllPositionsResponse struct {
 	Code int    `json:"code"`
 	Msg  string `json:"msg"`
 	Data struct {
-		Success bool `json:"success"` // Operation success flag
+		Success []int64       `json:"success"` // Массив order IDs которые успешно закрылись
+		Failed  []interface{} `json:"failed"`  // Массив ошибок (может быть null)
 	} `json:"data"`
 }
 
@@ -278,7 +280,34 @@ func (c *Client) CloseAllPositions(ctx context.Context, req CloseAllPositionsReq
 	return &resp, nil
 }
 
-// doRequest performs an authenticated API request.
+// SetMarginTypeRequest represents parameters for setting margin type.
+type SetMarginTypeRequest struct {
+	Symbol     string `json:"symbol"`               // Trading pair, e.g. "BTC-USDT"
+	MarginType string `json:"marginType"`           // CROSSED or ISOLATED
+	RecvWindow int64  `json:"recvWindow,omitempty"` // Request validity window in milliseconds
+}
+
+// SetMarginTypeResponse represents the response from setting margin type.
+type SetMarginTypeResponse struct {
+	Code int    `json:"code"`
+	Msg  string `json:"msg"`
+}
+
+// SetMarginType sets the margin type (CROSSED or ISOLATED) for a symbol.
+func (c *Client) SetMarginType(ctx context.Context, req SetMarginTypeRequest) (*SetMarginTypeResponse, error) {
+	params, err := structToMap(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert request: %w", err)
+	}
+
+	var resp SetMarginTypeResponse
+	if err := c.doRequest(ctx, http.MethodPost, "/openApi/swap/v2/trade/marginType", params, &resp); err != nil {
+		return nil, err
+	}
+
+	return &resp, nil
+}
+
 func (c *Client) doRequest(ctx context.Context, method, endpoint string, params map[string]interface{}, result interface{}) error {
 	if params == nil {
 		params = make(map[string]interface{})
@@ -304,7 +333,6 @@ func (c *Client) doRequest(ctx context.Context, method, endpoint string, params 
 	}
 
 	req.Header.Set(apiKeyHeader, c.apiKey)
-	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -335,17 +363,19 @@ func (c *Client) sign(message string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// buildQueryString builds a query string from parameters.
 func (c *Client) buildQueryString(params map[string]interface{}, urlEncode bool) string {
+	// Просто сортируем ВСЕ ключи алфавитно, включая timestamp
 	keys := make([]string, 0, len(params))
 	for k := range params {
 		keys = append(keys, k)
 	}
-	sort.Strings(keys)
+
+	sort.Strings(keys) // Алфавитная сортировка ВСЕХ параметров
 
 	var parts []string
 	for _, key := range keys {
-		value := fmt.Sprintf("%v", params[key])
+		value := c.formatValue(params[key])
+
 		if urlEncode && c.isComplexValue(value) {
 			value = url.QueryEscape(value)
 			value = strings.ReplaceAll(value, "+", "%20")
@@ -354,6 +384,47 @@ func (c *Client) buildQueryString(params map[string]interface{}, urlEncode bool)
 	}
 
 	return strings.Join(parts, "&")
+}
+
+// Обновите formatValue для больших чисел
+func (c *Client) formatValue(v interface{}) string {
+	switch val := v.(type) {
+	case float64:
+		// Для очень больших или очень маленьких чисел
+		if val == 0 {
+			return "0"
+		}
+
+		// Если число целое
+		if val == float64(int64(val)) && val < 1e15 && val > -1e15 {
+			return fmt.Sprintf("%.0f", val)
+		}
+
+		// Для дробных чисел используем адаптивную точность
+		// Определяем необходимое количество знаков
+		absVal := math.Abs(val)
+		var precision int
+		if absVal >= 1 {
+			precision = 8
+		} else if absVal >= 0.0001 {
+			precision = 8
+		} else {
+			precision = 10
+		}
+
+		s := fmt.Sprintf("%.*f", precision, val)
+		s = strings.TrimRight(s, "0")
+		s = strings.TrimRight(s, ".")
+		return s
+	case float32:
+		return c.formatValue(float64(val))
+	case int, int8, int16, int32, int64:
+		return fmt.Sprintf("%d", val)
+	case uint, uint8, uint16, uint32, uint64:
+		return fmt.Sprintf("%d", val)
+	default:
+		return fmt.Sprintf("%v", val)
+	}
 }
 
 // containsComplexValues checks if parameters contain complex JSON values.
@@ -386,8 +457,21 @@ func structToMap(v interface{}) (map[string]interface{}, error) {
 
 	// Remove nil/zero values
 	for k, v := range result {
-		if v == nil || v == "" || v == 0.0 || v == int64(0) {
+		switch val := v.(type) {
+		case nil:
 			delete(result, k)
+		case string:
+			if val == "" {
+				delete(result, k)
+			}
+		case float64:
+			if val == 0.0 {
+				delete(result, k)
+			}
+		case int64:
+			if val == 0 {
+				delete(result, k)
+			}
 		}
 	}
 
