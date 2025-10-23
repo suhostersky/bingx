@@ -182,6 +182,41 @@ func (c *Client) ListSymbols(ctx context.Context) (*ListSymbolsResponse, error) 
 	return &resp, nil
 }
 
+// Contract represents detailed contract information.
+type Contract struct {
+	ContractID      int64   `json:"contractId"`
+	Symbol          string  `json:"symbol"`
+	Size            float64 `json:"size"`
+	QuantityUnit    string  `json:"quantityUnit"`
+	PricePrecision  int     `json:"pricePrecision"`
+	VolumePrecision int     `json:"volumePrecision"`
+	TickSize        float64 `json:"tickSize"`
+	MinQty          float64 `json:"minQty"`
+	MaxQty          float64 `json:"maxQty"`
+	MinNotional     float64 `json:"minNotional"`
+	MaxNotional     float64 `json:"maxNotional"`
+	Status          int     `json:"status"`
+	Asset           string  `json:"asset"`
+	Currency        string  `json:"currency"`
+}
+
+// GetContractsResponse represents the response from getting contracts information.
+type GetContractsResponse struct {
+	Code int        `json:"code"`
+	Msg  string     `json:"msg"`
+	Data []Contract `json:"data"`
+}
+
+// GetContracts retrieves detailed information about all available perpetual swap contracts.
+func (c *Client) GetContracts(ctx context.Context) (*GetContractsResponse, error) {
+	var resp GetContractsResponse
+	if err := c.doRequest(ctx, http.MethodGet, "/openApi/swap/v2/quote/contracts", nil, &resp); err != nil {
+		return nil, err
+	}
+
+	return &resp, nil
+}
+
 // doRequest performs an authenticated API request.
 func (c *Client) doRequest(ctx context.Context, method, endpoint string, params map[string]interface{}, result interface{}) error {
 	if params == nil {
